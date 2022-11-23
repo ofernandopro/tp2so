@@ -18,104 +18,6 @@ struct Queue
 	struct proc* array[NPROC];
 };
 
-void create_queue(struct Queue *q)
-{
-  q->size = 0;
-  int i;
-  for (i = 0; i < NPROC; i++)
-  {
-    q->array[i] = 0;  
-  }
-}
-
-int is_full(struct Queue *queue)
-{
-	return (queue->size == NPROC);
-}
-
-int queue_is_empty(struct Queue *queue)
-{
-	return (queue->size == 0);
-}
-
-void queue_add(struct Queue *queue, struct proc* item)
-{
-  // cprintf("queue add\n");
-	if (is_full(queue))
-  {
-		return;
-  }
-  int index = queue->size;
-  queue->array[index] = item;
-  queue->size++;
-  // cprintf("queue add end\n");
-}
-
-void queue_remove(struct Queue *queue, struct proc* item) {
-  // cprintf("Trying to remove %p\n", item);
-  if (item == 0) {
-    return;
-  }
-	if (queue_is_empty(queue)) {
-    // cprintf("queue empty\n");
-		return;
-	}
-	int i = 0;
-  int found = 0;
-	while (i < NPROC)
-  {
-    if (queue->array[i] && queue->array[i]->pid == item->pid) {
-      // cprintf("%p was found\n", item);
-      found = 1;
-      break;
-    }
-    ++i;
-	}
-
-  if (found) {
-    while (i < NPROC - 1) {
-      queue->array[i] = queue->array[i + 1];
-
-      i++;
-    }
-    queue->array[queue->size - 1] = 0;
-    queue->size--;
-  }
-}
-
-struct proc* get_first_element(struct Queue *queue) {
-	int i;
-	for (i = 0; i < NPROC; i++) {
-    if (queue->array[i] && queue->array[i]->state == RUNNABLE) {
-      //queue_remove(queue, queue->array[i]);
-      //queue_add(queue, queue->array[i]);
-      return queue->array[i];
-    }
-	}
-	return 0;
-}
-
-void print_queue(struct Queue *queue) {
-	int i = 0;
-	for (i = queue->front; i < queue->size; i++) {
-		if (queue->array[i]) {
-			cprintf("%d ",queue->array[i]->pid);
-		}
-	}
-	cprintf("\n");
-}
-
-// As 3 filas de prioridade necessarias
-struct Queue queue0;
-struct Queue queue1;
-struct Queue queue2;
-
-void init_queues(void) {
-	create_queue(&queue0);
-	create_queue(&queue1);
-	create_queue(&queue2);
-}
-
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -133,7 +35,6 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
-  init_queues();
 }
 
 // Must be called with interrupts disabled
@@ -222,7 +123,6 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
   p->priority = STARTING_PRIORITY;
-  queue_add(&queue2, p);
   return p;
 }
 
@@ -447,40 +347,9 @@ void scheduler(void)
 		// Loop over process table looking for process to run.
 		acquire(&ptable.lock);
 		p = 0;
-		// Tenta encontrar um processo olhando nas filas 2 -> 1 -> 0
-    // cprintf("BEFORE:: Q0: %d, Q1: %d, Q2: %d\n", queue0.size, queue1.size, queue2.size);
-		if (!queue_is_empty(&queue2)) {
-			p = get_first_element(&queue2);
-		}
-    if (p == 0) {
-      // no runnable process in q0. look in q1.
-      if (!queue_is_empty(&queue1)) {
-				p = get_first_element(&queue1);
-			}
-      if (p == 0) {
-        // no runnable process in q1. look in q2.
-				if (!queue_is_empty(&queue0)) {
-					p = get_first_element(&queue0);
-				}
-			}
-    }
-    // cprintf("AFTER:: Q0: %d, Q1: %d, Q2: %d\n", queue0.size, queue1.size, queue2.size);
+		
 		if (p) {
 
-      // Move chosen process to the end of its priority queue.
-      if (p->priority == 0)
-      {
-        queue_remove(&queue0, p);
-        queue_add(&queue0, p);
-      } else if (p->priority == 1)
-      {
-        queue_remove(&queue1, p);
-        queue_add(&queue1, p);
-      } else 
-      {
-        queue_remove(&queue2, p);
-        queue_add(&queue2, p);
-      }
 
       // Switch to chosen process.  It is the process's job
 			// to release ptable.lock and then reacquire it
@@ -689,22 +558,6 @@ int set_prio(int prio) {
   myproc()->priority = prio;
   release(&ptable.lock);
 
-  if (prio == 2) {
-	  queue_add(&queue2, myproc());
-  } else if (prio == 1) {
-	  queue_add(&queue1, myproc());
-  } else {
-	  queue_add(&queue0, myproc());
-  }
-
-  if (old_priority == 2) {
-	  queue_remove(&queue2, myproc());
-  } else if (old_priority == 1) {
-	  queue_remove(&queue1, myproc());
-  } else {
-	  queue_remove(&queue0, myproc());
-  }
-
   return 0;
 }
 
@@ -774,37 +627,6 @@ void update_stats(void)
     else if (p->state == RUNNING)
     {
       p->rutime++;
-    }
-  }
-
-  release(&ptable.lock);
-}
-
-void aging(void)
-{
-  struct proc *p;
-  acquire(&ptable.lock);
-
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-  {
-    if (p->priority == 0)
-    {
-      if (p->retime >= ZERO_TO_ONE)
-      {
-        // cprintf("Process aged from 0 to 1\n");
-        queue_add(&queue1, p);
-        queue_remove(&queue0, p);
-        p->priority++;
-      }
-    } else if (p->priority == 1)
-    {
-      if (p->retime >= ONE_TO_TWO)
-      {
-        // cprintf("Process aged from 1 to 2\n");
-        queue_add(&queue2, p);
-        queue_remove(&queue1, p);
-        p->priority++;
-      }
     }
   }
 
