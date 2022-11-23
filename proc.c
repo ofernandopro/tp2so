@@ -546,21 +546,6 @@ procdump(void)
   }
 }
 
-int set_prio(int prio) {
-  // Priorities are to be within [0-2]
-  if (prio < 0 || prio > 2) {
-    return -1;
-  }
-
-  int old_priority = myproc()->priority;
-
-  acquire(&ptable.lock);
-  myproc()->priority = prio;
-  release(&ptable.lock);
-
-  return 0;
-}
-
 int wait2(int *retime, int *rutime, int *stime) {
   struct proc *p;
   int havekids, pid;
